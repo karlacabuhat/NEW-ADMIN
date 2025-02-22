@@ -85,7 +85,7 @@
                                 <th>Name</th>
                                 <th>Email</th>
                                 <th>Role</th>
-                                <th>Status</th>
+                                <th>Date Joined</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -98,7 +98,7 @@
         </main>
         </section>
         
-        <div id="addStaffModal" class="modal">
+        <div id="addStaffModal" class="modal" style="display: none;">
             <div class="modal-content">
                 <span class="close-btn">&times;</span>
                 <h2>Add New Member</h2>
@@ -140,13 +140,13 @@
             </div>
         </div>
         
-  <script type="module"> 
+        <script type="module">
             import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
-            import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
-            import { getAuth, sendPasswordResetEmail, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
-            import { getFirestore, doc, setDoc, deleteDoc, collection, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-            
-            // Firebase configuration
+            import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-database.js";
+            import { getAuth, createUserWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged,signInWithEmailAndPassword} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
+            import { getFirestore, doc, setDoc, collection, serverTimestamp, deleteDoc,getDocs } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+        
+            // Firebase Configuration
             const firebaseConfig = {
                 apiKey: "AIzaSyAqr7jav_7l0Y7gIhfTklJXnHPzjAYV8f4",
                 authDomain: "taga-cuyo-app.firebaseapp.com",
@@ -156,40 +156,73 @@
                 appId: "1:908851804845:web:dff839dc552a573a23a424",
                 measurementId: "G-NVSY2HPNX4"
             };
-        
-            // Initialize Firebase
-            const app = initializeApp(firebaseConfig);
-            const database = getDatabase(app, "https://taga-cuyo-app-default-rtdb.asia-southeast1.firebasedatabase.app");
-            const firestore = getFirestore(app);
-            const auth = getAuth(app);
-        
-            async function displayUsers() {
+            
+             // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app, "https://taga-cuyo-app-default-rtdb.asia-southeast1.firebasedatabase.app");
+    const firestore = getFirestore(app);
+    const auth = getAuth(app);
+
+    function encryptEmail(email) {
+    const atIndex = email.indexOf('@');
+    
+    if (atIndex === -1) {
+        // If no "@" symbol is found, return the email as is (just in case)
+        return email;
+    }
+
+    const localPart = email.substring(0, atIndex); // Get the part before "@"
+    const domainPart = email.substring(atIndex); // Get the part after "@"
+
+    // Check if the local part is long enough to apply the encryption
+    if (localPart.length > 5) {
+        const firstThree = localPart.substring(0, 3); 
+        const lastTwo = localPart.substring(localPart.length - 4); 
+        const middlePart = localPart.substring(3, localPart.length - 2); 
+
+        const encryptedLocalPart = firstThree + '*'.repeat(middlePart.length) + lastTwo;
+        return encryptedLocalPart + domainPart; // Combine encrypted local part with domain part
+    }
+
+    // If the local part is too short to encrypt, return the email as is
+    return email;
+}
+async function displayUsers() {
     const adminRef = collection(firestore, "admin"); 
     const querySnapshot = await getDocs(adminRef);
     
     let userTable = document.getElementById("staffTable").querySelector("tbody");
-    userTable.innerHTML = ""; 
+    userTable.innerHTML = ""; // Clear the table before populating
 
-    const user = auth.currentUser; // Get the currently logged-in user
+    const currentUser = auth.currentUser; // Get the currently logged-in user
 
     querySnapshot.forEach((doc) => {
         let adminUser = doc.data();
         let role = adminUser.isAdmin ? "Admin" : "Staff";
-        let status = adminUser.isActive || "Inactive"; // Default to "Inactive" if no status is found
+        let encryptedEmail = encryptEmail(adminUser.email);
+       
+        let date_joined = "N/A"; // Default value if createdAt is missing
+        if (adminUser.createdAt) {
+            const date = adminUser.createdAt.toDate(); // Convert Firestore timestamp to JavaScript Date
+            date_joined = date.toLocaleDateString("en-US", { 
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+            });
+        }
 
-        let isCurrentUser = user && adminUser.email === user.email; // Check if it's the logged-in user
-        
-        let deleteButton = isCurrentUser 
-            ? `<button class="delete-btn" data-id="${doc.id}" data-email="${adminUser.email}" disabled>Cannot Delete</button>` 
-            : `<button class="delete-btn" data-id="${doc.id}" data-email="${adminUser.email}">Delete</button>`;
-
+        // Check if the user is the current logged-in user
+        let isCurrentUser = currentUser && currentUser.email === adminUser.email;
+        let deleteButton = `<button class="delete-btn" data-id="${doc.id}" data-email="${adminUser.email}" 
+        ${isCurrentUser ? "disabled" : ""}>Delete</button>`;
+        // Create the table row
         let row = `<tr>
             <td>${adminUser.firstName} ${adminUser.lastName}</td>
-            <td>${adminUser.email}</td>
+            <td>${encryptedEmail}</td> <!-- Use encryptedEmail -->
             <td>${role}</td>
-            <td>${status}</td> <!-- Displays actual status -->
+            <td>${date_joined}</td>
             <td>
-                ${deleteButton}
+                <button class="delete-btn" data-id="${doc.id}" data-email="${adminUser.email}" ${isCurrentUser ? "disabled" : ""}>Delete</button>
                 <button class="reset-btn" data-email="${adminUser.email}">Reset Password</button>
             </td>
         </tr>`;
@@ -197,97 +230,8 @@
         userTable.innerHTML += row;
     });
 
-   
-        document.getElementById("addStaffForm").addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    const firstName = document.getElementById("firstName").value;
-    const lastName = document.getElementById("lastName").value;
-    const email = document.getElementById("email").value;
-    const birthdate = document.getElementById("birthdate").value;
-    const phoneNumber = document.getElementById("phoneNumber").value;
-    const role = document.getElementById("role").value; // Added role input field
-    
-    // Validate phone number (Philippines)
-    const phonePattern = /^(?:\+63|0)9\d{9}$/;
-    if (!phonePattern.test(phoneNumber)) {
-        document.getElementById("phoneError").style.display = "block";
-        return;
-    } else {
-        document.getElementById("phoneError").style.display = "none";
-    }
-    try {
-        // Generate a new Firestore document reference
-        const newUserRef = doc(collection(firestore, "admin"));
-        const userId = newUserRef.id; // Firestore generates a unique ID
-
-        const newUser = {
-            firstName,
-            lastName,
-            email,
-            birthdate,
-            phoneNumber,
-            role,
-            isAdmin: role === "admin", // Set isAdmin flag based on role
-            createdAt: serverTimestamp(), // Ensure timestamps are stored
-        };
-
-        // Store in Firestore
-        await setDoc(newUserRef, newUser);
-
-        // Store in Realtime Database
-        const adminRef = ref(database, `admin/${userId}`);
-        await set(adminRef, newUser);
-
-        // Send password reset email
-        await sendPasswordResetEmail(auth, email);
-
-        alert(`${lastName} ${firstName} added successfully as ${role}! A password reset email has been sent.`);
-        document.getElementById("addStaffForm").reset();
-        document.getElementById("addStaffModal").style.display = "none";
-        displayUsers(); // Refresh staff list
-
-    } catch (error) {
-        console.error("Error adding staff:", error);
-        alert("Failed to add staff. Please try again.");
-    }
-});
-// Show the modal when the button is clicked
-document.getElementById("addStaffBtn").addEventListener("click", () => {
-    document.getElementById("addStaffModal").style.display = "block";
-});
-
-// Function to close the modal
-function closeAddStaffModal() {
-    document.getElementById("addStaffModal").style.display = "none";
-}
-
-// Attach event listener to close button
-document.querySelector(".close-btn").addEventListener("click", closeAddStaffModal);
-
-// Close modal if user clicks outside of the modal content
-window.addEventListener("click", (event) => {
-    const modal = document.getElementById("addStaffModal");
-    if (event.target === modal) {
-        closeAddStaffModal();
-    }
-});
-
-
-
-async function deleteUserAccount(docId) {
-    try {
-        // Delete from Firestore
-        await deleteDoc(doc(firestore, "admin", docId));
-        alert("User deleted successfully.");
-    } catch (error) {
-        console.error("Error deleting user:", error);
-        alert("Failed to delete user. Please try again.");
-    }
-}
-
- // Attach event listeners to dynamically created delete buttons
-    document.querySelectorAll(".delete-btn:not([disabled])").forEach(button => {
+    // Attach event listeners to dynamically created delete buttons
+    document.querySelectorAll(".delete-btn").forEach(button => {
         button.addEventListener("click", async (e) => {
             const docId = e.target.getAttribute("data-id");
             const email = e.target.getAttribute("data-email");
@@ -321,13 +265,139 @@ async function deleteUserAccount(docId) {
     });
 }
 
+document.getElementById("addStaffForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const firstName = document.getElementById("firstName").value.trim();
+    const lastName = document.getElementById("lastName").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const birthdate = document.getElementById("birthdate").value;
+    const phoneNumber = document.getElementById("phoneNumber").value.trim();
+    const role = document.getElementById("role").value;
+    const gender = document.getElementById("gender").value;
+
+    // Get the current admin's authentication info
+    const currentAdmin = auth.currentUser;
+    const adminEmail = currentAdmin.email;
+    const adminPassword = prompt("Re-enter your password to proceed:");
+    try {
+    // Sign in the admin again before switching users
+    const adminCredential = await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+
+    // Create the new user
+    const userCredential = await createUserWithEmailAndPassword(auth, email, "TagaCuyo123!");
+    const newUserAuth = userCredential.user;
+
+    // Send password reset email
+    await sendPasswordResetEmail(auth, email);
+
+    const newUser = {
+        uid: newUserAuth.uid,
+        firstName,
+        lastName,
+        email,
+        birthdate,
+        phoneNumber: phoneNumber || null,
+        gender,
+        role,
+        isAdmin: role === "admin",
+        isActive: true,
+        createdAt: serverTimestamp()
+    };
+
+    // Store in Firestore
+    await setDoc(doc(firestore, "admin", newUserAuth.uid), newUser);
+
+    // Revert back to admin login
+    await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+
+    alert(`${lastName} ${firstName} added successfully as ${role}! A password reset email has been sent.`);
+    document.getElementById("addStaffForm").reset();
+    document.getElementById("addStaffModal").style.display = "none";
+
+    displayUsers();
+} catch (error) {
+    console.error("Error adding user:", error);
+    alert(`Failed to add staff/admin: ${error.message}`);
+}
+});
+
+    // Show the modal when the "Add Staff" button is clicked
+    document.getElementById("addStaffBtn").addEventListener("click", () => {
+        document.getElementById("addStaffModal").style.display = "block";
+    });
+
+    // Function to close the modal
+    function closeAddStaffModal() {
+        document.getElementById("addStaffModal").style.display = "none";
+    }
+
+    // Attach event listener to close button
+    document.addEventListener("click", (event) => {
+        if (event.target.classList.contains("close-btn")) {
+            closeAddStaffModal();
+        }
+    });
+
+    // Close modal if the user clicks outside the modal content
+    window.addEventListener("click", (event) => {
+        const modal = document.getElementById("addStaffModal");
+        if (event.target === modal) {
+            closeAddStaffModal();
+        }
+    });
+
+    // Function to delete a user
+    async function deleteUserAccount(docId) {
+        try {
+            await deleteDoc(doc(firestore, "admin", docId));
+            alert("User deleted successfully.");
+            displayUsers(); // Refresh table
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            alert("Failed to delete user. Please try again.");
+        }
+    }
+    // Event delegation for delete buttons (handles dynamically added elements)
+    document.addEventListener("click", async (event) => {
+        if (event.target.classList.contains("delete-btn") && !event.target.disabled) {
+            const docId = event.target.getAttribute("data-id");
+            if (confirm("Are you sure you want to delete this user?")) {
+                await deleteUserAccount(docId);
+            }
+        }
+    });
+
+    // Event delegation for reset password buttons
+    document.addEventListener("click", async (event) => {
+        if (event.target.classList.contains("reset-btn")) {
+            const email = event.target.getAttribute("data-email");
+            if (confirm(`Send password reset email to ${email}?`)) {
+                try {
+                    await sendPasswordResetEmail(auth, email);
+                    alert("Password reset email sent successfully.");
+                } catch (error) {
+                    console.error("Error sending reset email:", error);
+                    alert("Failed to send password reset email. Please try again.");
+                }
+            }
+        }
+    });
+
+   // Ensure the user is authenticated before displaying the users
 // Ensure the user is authenticated before displaying the users
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        displayUsers();
+        console.log("User is signed in:", user);
+        console.log("UID:", user.uid);
+        console.log("Email:", user.email);
+    } else {
+        console.log("No user is signed in.");
     }
+    displayUsers();
 });
-        </script>
+</script>
+           
         
 
 
